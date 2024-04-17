@@ -1,4 +1,4 @@
-import argparse
+from argparse import Namespace
 import os
 
 import librosa
@@ -12,6 +12,7 @@ from lib import nets
 from lib import spec_utils
 from lib import utils
 
+import pydub
 
 class Separator(object):
 
@@ -104,21 +105,22 @@ class Separator(object):
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
 DEFAULT_MODEL_PATH = os.path.join(MODEL_DIR, 'baseline.pth')
 
-def main():
-    p = argparse.ArgumentParser()
-    p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_model', '-P', type=str, default=DEFAULT_MODEL_PATH)
-    p.add_argument('--input', '-i', required=True)
-    p.add_argument('--sr', '-r', type=int, default=44100)
-    p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--hop_length', '-H', type=int, default=1024)
-    p.add_argument('--batchsize', '-B', type=int, default=4)
-    p.add_argument('--cropsize', '-c', type=int, default=256)
-    p.add_argument('--output_image', '-I', action='store_true')
-    p.add_argument('--tta', '-t', action='store_true')
-    p.add_argument('--postprocess', '-p', action='store_true')
-    p.add_argument('--output_dir', '-o', type=str, default="")
-    args = p.parse_args()
+def extract(filepath:str, 
+            fmt:str='wav',
+            gpu:int=-1, 
+            pretrained_model:str='models/baseline.pth', 
+            sr:int=44100, 
+            n_fft:int=2048, 
+            hop_length:int=1024,
+            batchsize:int=4,
+            cropsize:int=256,
+            output_image=False,
+            tta=False,
+            postprocess=False,
+            output_dir:str=''
+            ):
+    
+    args = Namespace(input=filepath, fmt=fmt, gpu=gpu, pretrained_model=pretrained_model, sr=sr, n_fft=n_fft, hop_length=hop_length, batchsize=batchsize, cropsize=cropsize, output_image=output_image, tta=tta, postprocess=postprocess, output_dir=output_dir)
 
     print('loading model...', end=' ')
     device = torch.device('cpu')
@@ -170,12 +172,28 @@ def main():
     print('inverse stft of instruments...', end=' ')
     wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
     print('done')
-    sf.write('{}{}_Instruments.wav'.format(output_dir, basename), wave.T, sr)
+    if args.fmt.lower() == 'wav':
+        sf.write('{}{}_Instruments.wav'.format(output_dir, basename), wave.T, sr)
+    elif args.fmt.lower() == 'mp3':
+        norm_wave = np.int16(wave * 2**15)
+        channels=norm_wave.shape[0]
+        song = pydub.AudioSegment(norm_wave.tobytes(), frame_rate=sr/2, sample_width=2, channels=channels)
+        song.export('{}{}_Instruments.mp3'.format(output_dir, basename), format="mp3", bitrate="320k")
+    else:
+        print(f'invalid export type: {args.fmt}')
 
     print('inverse stft of vocals...', end=' ')
     wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
     print('done')
-    sf.write('{}{}_Vocals.wav'.format(output_dir, basename), wave.T, sr)
+    if args.fmt.lower() == 'wav':
+        sf.write('{}{}_Vocals.wav'.format(output_dir, basename), wave.T, sr)
+    elif args.fmt.lower() == 'mp3':
+        norm_wave = np.int16(wave * 2**15)
+        channels=norm_wave.shape[0]
+        song = pydub.AudioSegment(norm_wave.tobytes(), frame_rate=sr/2, sample_width=2, channels=channels)
+        song.export('{}{}_Vocals.mp3'.format(output_dir, basename), format="mp3", bitrate="320k")
+    else:
+        print(f'invalid export type: {args.fmt}')
 
     if args.output_image:
         image = spec_utils.spectrogram_to_image(y_spec)
@@ -184,6 +202,5 @@ def main():
         image = spec_utils.spectrogram_to_image(v_spec)
         utils.imwrite('{}{}_Vocals.jpg'.format(output_dir, basename), image)
 
-
 if __name__ == '__main__':
-    main()
+    extract()
